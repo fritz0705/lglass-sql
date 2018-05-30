@@ -1,7 +1,9 @@
 # coding: utf-8
 
+import datetime
+
 from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, \
-    create_engine, or_, and_
+    create_engine, or_, and_, func
 from sqlalchemy.orm import relationship, sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 
@@ -13,18 +15,20 @@ Base = declarative_base()
 class Object(Base):
     __tablename__ = 'object'
     id = Column('id', Integer, primary_key=True)
-    class_ = Column('object_class', String)
-    key = Column('object_key', String)
+    class_ = Column('object_class', String, nullable=False)
+    key = Column('object_key', String, nullable=False)
+    source = Column('source', String)
+    last_modified = Column('last_modified', DateTime)
     fields = relationship("ObjectField", backref="object")
 
 
 class ObjectField(Base):
     __tablename__ = 'object_field'
     id = Column('id', Integer, primary_key=True)
-    object_id = Column('object_id', ForeignKey('object.id'))
-    position = Column('position', Integer)
-    key = Column('field_key', String)
-    value = Column('field_value', String)
+    object_id = Column('object_id', ForeignKey('object.id'), nullable=False)
+    position = Column('position', Integer, nullable=False)
+    key = Column('field_key', String, nullable=False)
+    value = Column('field_value', String, nullable=False)
 
 
 class SQLDatabase(lglass.database.Database):
@@ -105,7 +109,12 @@ class Session(object):
         obj_data = []
         for field in self.session.query(ObjectField).filter(ObjectField.object == sqlobj).order_by(ObjectField.position).all():
             obj_data.append((field.key, field.value))
-        return self.database.object_class_type(class_)(obj_data)
+        obj = self.database.object_class_type(class_)(obj_data)
+        if obj.source is None:
+            obj.source = sqlobj.source
+        if obj.last_modified is None:
+            obj.last_modified = sqlobj.last_modified
+        return obj
 
     def save(self, obj, local_manifest=False, **kwargs):
         primary_class, primary_key = self.database.primary_spec(obj)
@@ -115,10 +124,22 @@ class Session(object):
                                                    Object.key == primary_key.lower()).first()
         if sqlobj is None:
             sqlobj = Object(class_=primary_class, key=primary_key.lower())
-            self.session.add(sqlobj)
+        save_obj = lglass.nic.NicObject(obj)
+        sqlobj.source = self.database.database_name\
+                if save_obj.source is None\
+                else save_obj.source
+        if self.database.database_name in save_obj.get("source") or \
+                not save_obj.get("source"):
+            sqlobj.last_modified = datetime.datetime.utcnow()
+            save_obj.remove("last-modified")
+        elif sqlobj.last_modified is not None:
+            sqlobj.last_modified = sqlobj.last_modified
+        self.session.add(sqlobj)
         self.session.query(ObjectField).filter(
             ObjectField.object == sqlobj).delete()
-        for pos, line in enumerate(obj):
+        if save_obj.source == self.database.database_name:
+            save_obj.remove("source")
+        for pos, line in enumerate(save_obj):
             field = ObjectField(object=sqlobj, position=pos,
                                 key=line[0], value=line[1])
             self.session.add(field)
@@ -144,7 +165,7 @@ class Session(object):
             if isinstance(v, str):
                 v = (v,)
             filters.append(and_(ObjectField.key == k,
-                                ObjectField.value.in_(v)))
+                                func.lower(ObjectField.value).in_(v)))
         q = self.session.query(ObjectField).filter(or_(*filters))
         for fieldobj in q.all():
             sqlobj = fieldobj.object
@@ -155,5 +176,5 @@ class Session(object):
     def __enter__(self, *args):
         return self
 
-    def __exit__(self, *args):
+    def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
