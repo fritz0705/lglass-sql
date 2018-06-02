@@ -77,20 +77,20 @@ class SQLDatabase(lglass.database.Database):
         Base.metadata.create_all(self._engine)
 
 
-class Session(object):
+class Session(lglass.database.ProxyDatabase):
     def __init__(self, database, session):
+        super().__init__(database)
         self.session = session
-        self.database = database
 
         self.commit = self.session.commit
         self.close = self.session.close
 
     def lookup(self, classes=None, keys=None):
         if classes is None:
-            classes = self.database.object_classes
+            classes = self.backend.object_classes
         else:
-            classes = set(map(self.database.primary_class, classes)
-                          ) & self.database.object_classes
+            classes = set(map(self.backend.primary_class, classes)
+                          ) & self.backend.object_classes
         query = self.session.query(Object).filter(Object.class_.in_(classes))
         if keys is not None and not callable(keys):
             keys = list(map(str.lower, keys))
@@ -101,7 +101,7 @@ class Session(object):
 
     def fetch(self, class_, key):
         sqlobj = self.session.query(Object).filter(
-            Object.class_ == self.database.primary_class(class_), Object.key == key.lower()).first()
+            Object.class_ == self.backend.primary_class(class_), Object.key == key.lower()).first()
         if sqlobj is None:
             raise KeyError
         fields = self.session.query(ObjectField).filter(
@@ -109,7 +109,7 @@ class Session(object):
         obj_data = []
         for field in self.session.query(ObjectField).filter(ObjectField.object == sqlobj).order_by(ObjectField.position).all():
             obj_data.append((field.key, field.value))
-        obj = self.database.object_class_type(class_)(obj_data)
+        obj = self.backend.object_class_type(class_)(obj_data)
         if obj.source is None:
             obj.source = sqlobj.source
         if obj.last_modified is None:
@@ -117,7 +117,7 @@ class Session(object):
         return obj
 
     def save(self, obj, local_manifest=False, **kwargs):
-        primary_class, primary_key = self.database.primary_spec(obj)
+        primary_class, primary_key = self.backend.primary_spec(obj)
         if local_manifest:
             primary_key = "self"
         sqlobj = self.session.query(Object).filter(Object.class_ == primary_class,
@@ -125,10 +125,10 @@ class Session(object):
         if sqlobj is None:
             sqlobj = Object(class_=primary_class, key=primary_key.lower())
         save_obj = lglass.nic.NicObject(obj)
-        sqlobj.source = self.database.database_name\
+        sqlobj.source = self.backend.database_name\
                 if save_obj.source is None\
                 else save_obj.source
-        if self.database.database_name in save_obj.get("source") or \
+        if self.backend.database_name in save_obj.get("source") or \
                 not save_obj.get("source"):
             sqlobj.last_modified = datetime.datetime.utcnow()
             save_obj.remove("last-modified")
@@ -137,7 +137,7 @@ class Session(object):
         self.session.add(sqlobj)
         self.session.query(ObjectField).filter(
             ObjectField.object == sqlobj).delete()
-        if save_obj.source == self.database.database_name:
+        if save_obj.source == self.backend.database_name:
             save_obj.remove("source")
         for pos, line in enumerate(save_obj):
             field = ObjectField(object=sqlobj, position=pos,
@@ -145,7 +145,7 @@ class Session(object):
             self.session.add(field)
 
     def delete(self, obj):
-        primary_class, primary_key = self.database.primary_spec(obj)
+        primary_class, primary_key = self.backend.primary_spec(obj)
         sqlobj = self.session.query(Object).filter(Object.class_ == primary_class,
                                                    Object.key == primary_key.lower()).first()
         if sqlobj is None:
@@ -158,8 +158,8 @@ class Session(object):
         if classes is None:
             classes = self.object_classes
         else:
-            classes = set(map(self.database.primary_class, classes)
-                          ) & self.database.object_classes
+            classes = set(map(self.backend.primary_class, classes)
+                          ) & self.backend.object_classes
         filters = []
         for k, v in query.items():
             if isinstance(v, str):
@@ -178,3 +178,4 @@ class Session(object):
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
+
