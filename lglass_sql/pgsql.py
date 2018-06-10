@@ -220,7 +220,7 @@ class NicSession(Session):
             cur.execute(
                     "SELECT object.class, object.key FROM inverse_field "
                     "LEFT JOIN object ON object.id = object_id "
-                    "WHERE inverse_field.key IN (%(keys)s) "
+                    "WHERE inverse_field.key IN %(keys)s "
                     "AND inverse_field.value IN %(values)s",
                     {"keys": tuple(inverse_keys),
                         "values": tuple(map(str.lower, inverse_values))})
