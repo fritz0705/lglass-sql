@@ -41,7 +41,9 @@ class Database(lglass.database.Database):
         with self.session() as sess:
             return list(sess.find(filter=filter, classes=classes, keys=keys))
 
-    def session(self):
+    def session(self, conn=None):
+        if conn is not None:
+            return Session(self, conn)
         return Session(self, pg.connect(self._dsn, **self._connect_options))
 
 
@@ -53,14 +55,16 @@ class Session(lglass.database.ProxyDatabase):
     def save(self, obj, **options):
         primary_class, primary_key = self.primary_spec(obj)
         with self.conn.cursor() as cur:
-            cur.execute("INSERT INTO object (class, key) "
-                        "VALUES (lower(%s), lower(%s)) "
-                        "ON CONFLICT (lower(class), lower(key)) DO NOTHING "
-                        "RETURNING id", (primary_class, primary_key))
+            cur.execute(
+                "INSERT INTO object (class, key) "
+                "VALUES (lower(%s), lower(%s)) "
+                "ON CONFLICT (lower(class), lower(key)) DO NOTHING "
+                "RETURNING id", (primary_class, primary_key))
             obj_id = cur.fetchone()[0]
             cur.execute(
                 "DELETE FROM object_field WHERE object_id = %s", (obj_id,))
-            pg.extras.execute_values(cur,
+            pg.extras.execute_values(
+                cur,
                 "INSERT INTO object_field (key, value, "
                 "object_id, position) VALUES %s",
                 [(line[0], line[1], obj_id, offset) for offset, line
@@ -70,23 +74,26 @@ class Session(lglass.database.ProxyDatabase):
     def delete(self, obj):
         primary_class, primary_key = self.primary_spec(obj)
         with self.conn.cursor() as cur:
-            cur.execute("DELETE FROM object WHERE lower(class) = lower(%s) "
-                        "AND lower(key) = lower(%s)",
-                        (primary_class, primary_key))
+            cur.execute(
+                "DELETE FROM object WHERE lower(class) = lower(%s) "
+                "AND lower(key) = lower(%s)",
+                (primary_class, primary_key))
             if not cur.rowcount:
                 raise KeyError(repr((primary_class, primary_key)))
 
     def fetch(self, class_, key):
         with self.conn.cursor() as cur:
-            cur.execute("SELECT id FROM object "
-                    "WHERE lower(class) = lower(%s) "
-                    "AND lower(key) = lower(%s)", (class_, key))
+            cur.execute(
+                "SELECT id FROM object "
+                "WHERE lower(class) = lower(%s) "
+                "AND lower(key) = lower(%s)", (class_, key))
             if not cur.rowcount:
                 raise KeyError(repr((class_, key)))
             obj_id = cur.fetchone()[0]
-            cur.execute("SELECT key, value FROM object_field "
-                    "WHERE object_id = %s "
-                    "ORDER BY position", (obj_id,))
+            cur.execute(
+                "SELECT key, value FROM object_field "
+                "WHERE object_id = %s "
+                "ORDER BY position", (obj_id,))
             return lglass.object.Object(cur.fetchall())
 
     def lookup(self, classes=None, keys=None):
@@ -96,20 +103,23 @@ class Session(lglass.database.ProxyDatabase):
 
         if keys is None:
             with self.conn.cursor() as cur:
-                cur.execute("SELECT class, key FROM object "
-                            "WHERE lower(class) IN %s", (classes,))
+                cur.execute(
+                    "SELECT class, key FROM object "
+                    "WHERE lower(class) IN %s", (classes,))
                 return cur.fetchall()
         elif callable(keys):
             with self.conn.cursor() as cur:
-                cur.execute("SELECT class, key FROM object "
-                        "WHERE lower(class) IN %s ", (classes,))
+                cur.execute(
+                    "SELECT class, key FROM object "
+                    "WHERE lower(class) IN %s ", (classes,))
                 return list(filter(lambda x: keys(x[1]), cur.fetchall()))
         else:
             keys = tuple(map(str.lower, keys))
             with self.conn.cursor() as cur:
-                cur.execute("SELECT class, key FROM object "
-                            "WHERE lower(class) IN %s "
-                            "AND lower(key) IN %s", (classes, keys))
+                cur.execute(
+                    "SELECT class, key FROM object "
+                    "WHERE lower(class) IN %s "
+                    "AND lower(key) IN %s", (classes, keys))
                 return cur.fetchall()
 
     def search(self, query={}, classes=None, keys=None):
@@ -149,10 +159,12 @@ class NicDatabase(Database, lglass.nic.NicDatabaseMixin):
         self.inverse_keys = set(self.inverse_keys)
         self._manifest = None
         if database_name is None:
-            database_name = pg.extensions.parse_dsn(dsn)["dbname"]
+            database_name = self._get_database_name()
         self._database_name = database_name
 
-    def session(self):
+    def session(self, conn=None):
+        if conn is not None:
+            return NicSession(self, conn)
         return NicSession(self, pg.connect(self._dsn, **self._connect_options))
 
     def search_route(self, address):
@@ -167,6 +179,16 @@ class NicDatabase(Database, lglass.nic.NicDatabaseMixin):
         with self.session() as sess:
             return sess.search_as_block(asn)
 
+    def _get_database_name(self):
+        try:
+            with pg.connect(self._dsn, **self._connect_options) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SHOW lglass.dbname")
+                    return cur.fetchone()[0]
+        except pg.ProgrammingError:
+            pass
+        return pg.extensions.parse_dsn(dsn)["dbname"]
+
     @property
     def manifest(self):
         if self._manifest is None:
@@ -176,7 +198,7 @@ class NicDatabase(Database, lglass.nic.NicDatabaseMixin):
                 self._manifest = self.create_object(
                     [("database", self._database_name)])
         return self._manifest
-    
+
     def save_manifest(self):
         self.save(self.manifest)
 
@@ -189,36 +211,78 @@ class NicSession(Session):
     def create_object(self, *args, **kwargs):
         return self.backend.create_object(*args, **kwargs)
 
+    def search_inverse(self, inverse_keys, inverse_values,
+            classes=None, keys=None):
+        if classes is None:
+            classes = self.object_classes
+        specs = []
+        with self.conn.cursor() as cur:
+            cur.execute(
+                    "SELECT object.class, object.key FROM inverse_field "
+                    "LEFT JOIN object ON object.id = object_id "
+                    "WHERE inverse_field.key IN (%(keys)s) "
+                    "AND inverse_field.value IN %(values)s",
+                    {"keys": tuple(inverse_keys),
+                        "values": tuple(map(str.lower, inverse_values))})
+            specs += cur.fetchall()
+        return [self.fetch(class_, key) for class_, key in specs
+                if class_ in classes]
+
     def lookup_route(self, address, limit=None):
         address = str(address)
         with self.conn.cursor() as cur:
-            cur.execute("SELECT object.class, object.key FROM route "
-                        "LEFT JOIN object ON object.id = object_id "
-                        "WHERE address >> %s "
-                        "ORDER BY masklen(address) DESC "
-                        "LIMIT %s", (address,limit,))
+            cur.execute(
+                "SELECT object.class, object.key FROM route "
+                "LEFT JOIN object ON object.id = object_id "
+                "WHERE address >> %(addr)s OR address = %(addr)s "
+                "ORDER BY masklen(address) DESC "
+                "LIMIT %(limit)s", {"addr": address,
+                                    "limit": limit})
             return cur.fetchall()
 
     def lookup_inetnum(self, address, limit=None):
         address = str(address)
         objs = []
         with self.conn.cursor() as cur:
-            cur.execute("SELECT object.class, object.key FROM inetnum "
-                        "LEFT JOIN object ON object.id = object_id "
-                        "WHERE address >> %s "
-                        "ORDER BY masklen(address) DESC "
-                        "LIMIT %s", (address,limit,))
+            cur.execute(
+                "SELECT object.class, object.key FROM inetnum "
+                "LEFT JOIN object ON object.id = object_id "
+                "WHERE address >> %(addr)s OR address = %(addr)s "
+                "ORDER BY masklen(address) DESC "
+                "LIMIT %(limit)s", {"addr": address,
+                                    "limit": limit})
             return cur.fetchall()
 
-    def search_as_block(self, asn):
+    def lookup_as_block(self, asn):
         with self.conn.cursor() as cur:
-            cur.execute("SELECT object.class, object.key FROM as_block "
-                        "LEFT JOIN object ON object.id = object_id "
-                        "WHERE range @> (%s::int8) ", (asn,))
+            cur.execute(
+                "SELECT object.class, object.key FROM as_block "
+                "LEFT JOIN object ON object.id = object_id "
+                "WHERE range @> (%s::int8) "
+                "ORDER BY (upper(range) - lower(range))", (asn,))
             return cur.fetchall()
 
     def fetch(self, class_, key):
-        return self.create_object(super().fetch(class_, key))
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, source, last_modified, created FROM object "
+                "WHERE lower(class) = lower(%s) "
+                "AND lower(key) = lower(%s)", (class_, key))
+            if not cur.rowcount:
+                raise KeyError(repr((class_, key)))
+            obj_id, source, last_modified, created = cur.fetchone()
+            cur.execute(
+                "SELECT key, value FROM object_field "
+                "WHERE object_id = %s "
+                "ORDER BY position", (obj_id,))
+            obj = self.create_object(cur.fetchall())
+        if "last-modified" not in obj and last_modified:
+            obj.last_modified = last_modified
+        if "created" not in obj and created:
+            obj.created = created
+        if "source" not in obj and source:
+            obj.source = source
+        return obj
 
     def save(self, obj, **options):
         obj = self.create_object(obj)
@@ -266,12 +330,13 @@ class NicSession(Session):
                 "(address, asn) DO UPDATE SET object_id = %(obj_id)s",
                 {"obj_id": obj_id, "addr": str(obj.ip_network),
                  "asn": obj.origin[2:]})
-        elif obj.object_class == "as-block" and False:
+        elif obj.object_class == "as-block":
             cur.execute(
                 "INSERT INTO as_block (object_id, range) VALUES "
                 "(%(obj_id)s, %(range)s) ON CONFLICT (range) "
                 "DO UPDATE SET object_id = %(obj_id)s",
-                {"obj_id": obj_id, "range": pg.extras.Range(obj.start,
+                {"obj_id": obj_id, "range": pg.extras.NumericRange(
+                    obj.start,
                     obj.end, '[]')})
         elif obj.object_class == "database":
             cur.execute(
@@ -289,3 +354,22 @@ class NicSession(Session):
             "ON CONFLICT DO NOTHING",
             [(obj_id, key, value.split()[0].lower()) for key, value in obj.data
                 if key in self.backend.inverse_keys])
+
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) < 2:
+        print("Usage: python -m lglass_sql.pgsql COMMAND")
+    elif sys.argv[1] == 'whois':
+        import lglass.whois.engine
+        lglass.whois.engine.main(sys.argv[2:],
+                                 database_cls=NicDatabase)
+    elif sys.argv[1] == 'whoisd':
+        import lglass.whois.server
+        lglass.whois.server.main(
+            sys.argv[2:],
+            database_cls=NicDatabase)
+    elif sys.argv[1] == 'import':
+        pass
+    else:
+        print("Invalid command: {}".format(sys.argv[1]))
