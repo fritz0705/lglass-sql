@@ -2,6 +2,7 @@
 
 import psycopg2 as pg
 import psycopg2.extras
+import psycopg2.extensions
 
 import lglass.database
 import lglass.nic
@@ -142,11 +143,13 @@ class NicDatabase(Database, lglass.nic.NicDatabaseMixin):
                     "nserver", "origin", "org", "ref-nfy", "tech-c", "upd-to",
                     "zone-c"}
 
-    def __init__(self, *args, database_name="dn42-gen2", **kwargs):
-        Database.__init__(self, *args, **kwargs)
+    def __init__(self, dsn, *args, database_name=None, **kwargs):
+        Database.__init__(self, dsn, *args, **kwargs)
         lglass.nic.NicDatabaseMixin.__init__(self)
         self.inverse_keys = set(self.inverse_keys)
         self._manifest = None
+        if database_name is None:
+            database_name = pg.extensions.parse_dsn(dsn)["dbname"]
         self._database_name = database_name
 
     def session(self):
@@ -167,7 +170,11 @@ class NicDatabase(Database, lglass.nic.NicDatabaseMixin):
     @property
     def manifest(self):
         if self._manifest is None:
-            self._manifest = self.fetch("database", self._database_name)
+            try:
+                self._manifest = self.fetch("database", self._database_name)
+            except KeyError:
+                self._manifest = self.create_object(
+                    [("database", self._database_name)])
         return self._manifest
 
 
