@@ -176,6 +176,9 @@ class NicDatabase(Database, lglass.nic.NicDatabaseMixin):
                 self._manifest = self.create_object(
                     [("database", self._database_name)])
         return self._manifest
+    
+    def save_manifest(self):
+        self.save(self.manifest)
 
 
 class NicSession(Session):
