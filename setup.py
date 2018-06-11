@@ -12,15 +12,16 @@ setuptools.setup(
     author_email="fritz@grimpen.net",
     url="https://github.com/fritz0705/lglass-sql.git",
     license="https://opensource.org/licenses/MIT",
-    description="SQL database for lglass",
+    description="SQL database backend for lglass",
     classifiers=[
-            "Development Status :: 4 - Beta"
-            "Programming Language :: Python :: 3 :: Only"
-            "Topic :: System :: Networking"
+            "Development Status :: 4 - Beta",
+            "Programming Language :: Python :: 3 :: Only",
+            "Topic :: System :: Networking",
+            "Topic :: Database"
     ],
     install_requires=[
         "lglass",
-        "sqlalchemy"
+        "psycopg2"
     ],
     package_data={
     }

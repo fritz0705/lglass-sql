@@ -1,11 +1,224 @@
 # coding: utf-8
 
+import psycopg2 as pg
+import psycopg2.extras
+import psycopg2.extensions
+import psycopg2.pool
+
 import lglass.nic
 
-import lglass_sql.database
+import lglass_sql.base
 
+class NicDatabase(lglass_sql.base.Database, lglass.nic.NicDatabaseMixin):
+    inverse_keys = {"abuse-mailbox", "admin-c", "author", "auth",
+                    "fingerprint", "person", "irt-nfy", "local-as", "mnt-irt",
+                    "mbrs-by-ref", "member-of", "mnt-by", "mnt-domains",
+                    "mnt-lower", "mnt-nfy", "mnt-routes", "mnt-ref", "notify",
+                    "nserver", "origin", "org", "ref-nfy", "tech-c", "upd-to",
+                    "zone-c"}
 
-class SQLDatabase(lglass_sql.database.SQLDatabase, lglass.nic.NicDatabaseMixin):
-    def __init__(self, *args, **kwargs):
-        lglass_sql.database.SQLDatabase.__init__(self, *args, **kwargs)
+    def __init__(self, dsn_or_pool, *args, database_name=None, **kwargs):
+        lglass_sql.base.Database.__init__(self, dsn_or_pool, *args, **kwargs)
         lglass.nic.NicDatabaseMixin.__init__(self)
+        self.inverse_keys = set(self.inverse_keys)
+        self._manifest = None
+        if database_name is None:
+            database_name = self._get_database_name()
+        self._database_name = database_name
+
+    def session(self, conn=None):
+        if conn is not None:
+            return NicSession(self, conn)
+        if self.pool is not None:
+            return NicSession(self, self.pool.getconn(), pool=self.pool)
+        return NicSession(self, pg.connect(self.dsn, **self._connect_options))
+
+    def search_route(self, address):
+        with self.session() as sess:
+            return list(sess.search_route(address))
+
+    def search_inetnum(self, address):
+        with self.session() as sess:
+            return list(sess.search_inetnum(address))
+
+    def search_as_block(self, asn):
+        with self.session() as sess:
+            return list(sess.search_as_block(asn))
+
+    def _get_database_name(self):
+        try:
+            with self.session() as sess:
+                with sess.conn.cursor() as cur:
+                    cur.execute("SHOW lglass.dbname")
+                    return cur.fetchone()[0]
+        except pg.ProgrammingError:
+            pass
+        if self.dsn is not None:
+            return pg.extensions.parse_dsn(self.dsn)["dbname"]
+
+    @property
+    def manifest(self):
+        if self._manifest is None:
+            try:
+                self._manifest = self.fetch("database", self._database_name)
+            except KeyError:
+                self._manifest = self.create_object(
+                    [("database", self._database_name)])
+        return self._manifest
+
+    def save_manifest(self):
+        self.save(self.manifest)
+
+
+class NicSession(lglass_sql.base.Session):
+    @property
+    def inverse_keys(self):
+        return self.backend.inverse_keys
+
+    def create_object(self, *args, **kwargs):
+        return self.backend.create_object(*args, **kwargs)
+
+    def search_inverse(self, inverse_keys, inverse_values,
+            classes=None, keys=None):
+        if classes is None:
+            classes = self.object_classes
+        specs = []
+        with self.conn.cursor() as cur:
+            cur.execute(
+                    "SELECT object.class, object.key FROM inverse_field "
+                    "LEFT JOIN object ON object.id = object_id "
+                    "WHERE inverse_field.key IN %(keys)s "
+                    "AND inverse_field.value IN %(values)s",
+                    {"keys": tuple(inverse_keys),
+                        "values": tuple(map(str.lower, inverse_values))})
+            for class_, key in cur:
+                if class_ in classes:
+                    yield self.fetch(class_, key)
+
+    def lookup_route(self, address, limit=None):
+        address = str(address)
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT object.class, object.key FROM route "
+                "LEFT JOIN object ON object.id = object_id "
+                "WHERE address >> %(addr)s OR address = %(addr)s "
+                "ORDER BY masklen(address) DESC "
+                "LIMIT %(limit)s", {"addr": address,
+                                    "limit": limit})
+            yield from cur
+
+    def lookup_inetnum(self, address, limit=None):
+        address = str(address)
+        objs = []
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT object.class, object.key FROM inetnum "
+                "LEFT JOIN object ON object.id = object_id "
+                "WHERE address >> %(addr)s OR address = %(addr)s "
+                "ORDER BY masklen(address) DESC "
+                "LIMIT %(limit)s", {"addr": address,
+                                    "limit": limit})
+            yield from cur
+
+    def lookup_as_block(self, asn):
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT object.class, object.key FROM as_block "
+                "LEFT JOIN object ON object.id = object_id "
+                "WHERE range @> (%s::int8) "
+                "ORDER BY (upper(range) - lower(range))", (asn,))
+            yield from cur
+
+    def fetch(self, class_, key):
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, source, last_modified, created FROM object "
+                "WHERE lower(class) = lower(%s) "
+                "AND lower(key) = lower(%s)", (class_, key))
+            if not cur.rowcount:
+                raise KeyError(repr((class_, key)))
+            obj_id, source, last_modified, created = cur.fetchone()
+            cur.execute(
+                "SELECT key, value FROM object_field "
+                "WHERE object_id = %s "
+                "ORDER BY position", (obj_id,))
+            obj = self.create_object(cur.fetchall())
+        if "last-modified" not in obj and last_modified:
+            obj.last_modified = last_modified
+        if "created" not in obj and created:
+            obj.created = created
+        if "source" not in obj and source:
+            obj.source = source
+        return obj
+
+    def save(self, obj, **options):
+        obj = self.create_object(obj)
+        with self.conn.cursor() as cur:
+            obj_id = self._save_raw_object(obj, cur)
+            self._save_aux(obj, obj_id, cur)
+            self._save_inverse(obj, obj_id, cur)
+        return obj_id
+
+    def _save_raw_object(self, obj, cur):
+        primary_class, primary_key = self.primary_spec(obj)
+        cur.execute(
+            "INSERT INTO object (class, key, source, created, "
+            "last_modified) VALUES (lower(%(class)s), lower(%(key)s), "
+            "%(source)s, %(created)s, %(last_modified)s) ON CONFLICT "
+            "(lower(class), lower(key)) DO UPDATE SET "
+            "source = %(source)s, created = %(created)s, "
+            "last_modified = %(last_modified)s RETURNING id",
+            {"class": primary_class, "key": primary_key,
+             "source": obj.source, "created": obj.created,
+             "last_modified": obj.last_modified})
+        obj_id = cur.fetchone()[0]
+        cur.execute(
+            "DELETE FROM inverse_field WHERE object_id = %s", (obj_id,))
+        cur.execute(
+            "DELETE FROM object_field WHERE object_id = %s", (obj_id,))
+        pg.extras.execute_values(
+            cur, "INSERT INTO object_field "
+            "(key, value, object_id, position) VALUES %s",
+            [(line[0], line[1], obj_id, offset)
+             for offset, line in enumerate(obj.data)])
+        return obj_id
+
+    def _save_aux(self, obj, obj_id, cur):
+        if obj.object_class in {"inetnum", "inet6num"}:
+            cur.execute(
+                "INSERT INTO inetnum (object_id, address) VALUES "
+                "(%(obj_id)s, %(addr)s) ON CONFLICT (address) "
+                "DO UPDATE SET object_id = %(obj_id)s",
+                {"obj_id": obj_id, "addr": str(obj.ip_network)})
+        elif obj.object_class in {"route", "route6"}:
+            cur.execute(
+                "INSERT INTO route (object_id, address, asn) "
+                "VALUES (%(obj_id)s, %(addr)s, %(asn)s) ON CONFLICT "
+                "(address, asn) DO UPDATE SET object_id = %(obj_id)s",
+                {"obj_id": obj_id, "addr": str(obj.ip_network),
+                 "asn": obj.origin[2:].split()[0]})
+        elif obj.object_class == "as-block":
+            cur.execute(
+                "INSERT INTO as_block (object_id, range) VALUES "
+                "(%(obj_id)s, %(range)s) ON CONFLICT (range) "
+                "DO UPDATE SET object_id = %(obj_id)s",
+                {"obj_id": obj_id, "range": pg.extras.NumericRange(
+                    obj.start,
+                    obj.end, '[]')})
+        elif obj.object_class == "database":
+            cur.execute(
+                "INSERT INTO source (name, serial, object_id) "
+                "VALUES (%(name)s, %(serial)s, %(obj_id)s) "
+                "ON CONFLICT (lower(name)) DO UPDATE SET "
+                "serial = %(serial)s",
+                {"obj_id": obj_id, "name": obj.primary_key,
+                 "serial": obj.get("serial") or 0})
+
+    def _save_inverse(self, obj, obj_id, cur):
+        pg.extras.execute_values(
+            cur,
+            "INSERT INTO inverse_field (object_id, key, value) VALUES %s "
+            "ON CONFLICT DO NOTHING",
+            [(obj_id, key, value.split()[0].lower()) for key, value in obj.data
+                if key in self.backend.inverse_keys])
+
