@@ -213,6 +213,13 @@ class NicSession(lglass_sql.base.Session):
                 "serial = %(serial)s",
                 {"obj_id": obj_id, "name": obj.primary_key,
                  "serial": obj.get("serial") or 0})
+        elif obj.object_class == "domain":
+            cur.execute(
+                    "INSERT INTO domain (object_id, name) "
+                    "VALUES (%(obj_id)s, %(name)s) "
+                    "ON CONFLICT (reverse(lower(name)) DO UPDATE SET "
+                    "object_id = %(obj_id)s",
+                    {"obj_id": obj_id, "name": obj.primary_key})
 
     def _save_inverse(self, obj, obj_id, cur):
         pg.extras.execute_values(

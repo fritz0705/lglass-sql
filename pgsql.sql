@@ -88,3 +88,13 @@ CREATE TABLE IF NOT EXISTS as_block (
 CREATE INDEX IF NOT EXISTS as_block_idx_range ON as_block
 	USING GIST (range);
 
+CREATE INDEX IF NOT EXISTS as_block_idx_object_id ON as_block (object_id);
+
+CREATE TABLE IF NOT EXISTS domain (
+	object_id integer not null references object(id) on delete cascade,
+	name varchar unique not null
+);
+
+CREATE INDEX IF NOT EXISTS domain_idx_object_id ON domain (object_id);
+CREATE INDEX IF NOT EXISTS domain_idx_name_rev ON domain (reverse(name));
+
