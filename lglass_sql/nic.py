@@ -130,11 +130,12 @@ class NicSession(lglass_sql.base.Session):
             yield from cur
 
     def lookup_domain(self, domain):
-        with self.conn.cursor() as cur.execute(
+        with self.conn.cursor() as cur:
+            cur.execute(
                 "SELECT object.class, object.key FROM domain "
                 "LEFT JOIN object ON object.id = object_id "
                 "WHERE reverse(lower(name)) LIKE %s "
-                "ORDER BY name", (domain[::-1] + '%',)):
+                "ORDER BY name", (domain[::-1] + '%',))
             yield from cur
 
     def fetch(self, class_, key):
