@@ -129,6 +129,14 @@ class NicSession(lglass_sql.base.Session):
                 "ORDER BY (upper(range) - lower(range))", (asn,))
             yield from cur
 
+    def lookup_domain(self, domain):
+        with self.conn.cursor() as cur.execute(
+                "SELECT object.class, object.key FROM domain "
+                "LEFT JOIN object ON object.id = object_id "
+                "WHERE reverse(lower(name)) LIKE %s "
+                "ORDER BY name", (domain[::-1] + '%',)):
+            yield from cur
+
     def fetch(self, class_, key):
         with self.conn.cursor() as cur:
             cur.execute(
@@ -217,7 +225,7 @@ class NicSession(lglass_sql.base.Session):
             cur.execute(
                     "INSERT INTO domain (object_id, name) "
                     "VALUES (%(obj_id)s, %(name)s) "
-                    "ON CONFLICT (reverse(lower(name)) DO UPDATE SET "
+                    "ON CONFLICT (reverse(lower(name))) DO UPDATE SET "
                     "object_id = %(obj_id)s",
                     {"obj_id": obj_id, "name": obj.primary_key})
 
