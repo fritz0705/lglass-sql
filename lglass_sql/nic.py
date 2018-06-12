@@ -231,7 +231,7 @@ class NicSession(lglass_sql.base.Session):
             cur.execute(
                 "INSERT INTO domain (object_id, name) "
                 "VALUES (%(obj_id)s, lower(%(name)s)) "
-                "ON CONFLICT name DO UPDATE SET "
+                "ON CONFLICT (name) DO UPDATE SET "
                 "object_id = %(obj_id)s",
                 {"obj_id": obj_id, "name": obj.primary_key})
 
