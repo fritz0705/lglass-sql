@@ -11,7 +11,7 @@ import lglass_sql.base
 
 class NicDatabase(lglass_sql.base.Database, lglass.nic.NicDatabaseMixin):
     inverse_keys = {"abuse-mailbox", "admin-c", "author", "auth",
-                    "fingerprint", "person", "irt-nfy", "local-as", "mnt-irt",
+                    "fingerpr", "person", "irt-nfy", "local-as", "mnt-irt",
                     "mbrs-by-ref", "member-of", "mnt-by", "mnt-domains",
                     "mnt-lower", "mnt-nfy", "mnt-routes", "mnt-ref", "notify",
                     "nserver", "origin", "org", "ref-nfy", "tech-c", "upd-to",
@@ -88,7 +88,8 @@ class NicSession(lglass_sql.base.Session):
                     "SELECT object.class, object.key FROM inverse_field "
                     "LEFT JOIN object ON object.id = object_id "
                     "WHERE inverse_field.key IN %(keys)s "
-                    "AND inverse_field.value IN %(values)s",
+                    "AND inverse_field.value IN %(values)s "
+                    "ORDER BY inverse_field.value",
                     {"keys": tuple(inverse_keys),
                         "values": tuple(map(str.lower, inverse_values))})
             for class_, key in cur:
@@ -107,17 +108,20 @@ class NicSession(lglass_sql.base.Session):
                                     "limit": limit})
             yield from cur
 
-    def lookup_inetnum(self, address, limit=None):
+    def lookup_inetnum(self, address, relation='>>', limit=None):
         address = str(address)
         objs = []
+        if relation not in {'>>', '<<'}:
+            raise ValueError("{} is not a valid relation, must be one "
+                    "of '>>' or '<<'".format(repr(relation)))
+        query = "SELECT object.class, object.key FROM inetnum " \
+                "LEFT JOIN object ON object.id = object_id " \
+                "WHERE address {relation} %(addr)s OR address = %(addr)s " \
+                "ORDER BY masklen(address) {order} " \
+                "LIMIT %(limit)s".format(relation=relation,
+                        order="DESC" if relation == '>>' else "ASC")
         with self.conn.cursor() as cur:
-            cur.execute(
-                "SELECT object.class, object.key FROM inetnum "
-                "LEFT JOIN object ON object.id = object_id "
-                "WHERE address >> %(addr)s OR address = %(addr)s "
-                "ORDER BY masklen(address) DESC "
-                "LIMIT %(limit)s", {"addr": address,
-                                    "limit": limit})
+            cur.execute(query, {"addr": str(address), "limit": limit})
             yield from cur
 
     def lookup_as_block(self, asn):
