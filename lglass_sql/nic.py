@@ -9,6 +9,7 @@ import lglass.nic
 
 import lglass_sql.base
 
+
 class NicDatabase(lglass_sql.base.Database, lglass.nic.NicDatabaseMixin):
     inverse_keys = {"abuse-mailbox", "admin-c", "author", "auth",
                     "fingerpr", "person", "irt-nfy", "local-as", "mnt-irt",
@@ -79,19 +80,19 @@ class NicSession(lglass_sql.base.Session):
         return self.backend.create_object(*args, **kwargs)
 
     def search_inverse(self, inverse_keys, inverse_values,
-            classes=None, keys=None):
+                       classes=None, keys=None):
         if classes is None:
             classes = self.object_classes
         specs = []
         with self.conn.cursor() as cur:
             cur.execute(
-                    "SELECT object.class, object.key FROM inverse_field "
-                    "LEFT JOIN object ON object.id = object_id "
-                    "WHERE inverse_field.key IN %(keys)s "
-                    "AND inverse_field.value IN %(values)s "
-                    "ORDER BY inverse_field.value",
-                    {"keys": tuple(inverse_keys),
-                        "values": tuple(map(str.lower, inverse_values))})
+                "SELECT object.class, object.key FROM inverse_field "
+                "LEFT JOIN object ON object.id = object_id "
+                "WHERE inverse_field.key IN %(keys)s "
+                "AND inverse_field.value IN %(values)s "
+                "ORDER BY inverse_field.value",
+                {"keys": tuple(inverse_keys),
+                 "values": tuple(map(str.lower, inverse_values))})
             for class_, key in cur:
                 if class_ in classes:
                     yield self.fetch(class_, key)
@@ -113,13 +114,13 @@ class NicSession(lglass_sql.base.Session):
         objs = []
         if relation not in {'>>', '<<'}:
             raise ValueError("{} is not a valid relation, must be one "
-                    "of '>>' or '<<'".format(repr(relation)))
+                             "of '>>' or '<<'".format(repr(relation)))
         query = "SELECT object.class, object.key FROM inetnum " \
                 "LEFT JOIN object ON object.id = object_id " \
                 "WHERE address {relation} %(addr)s OR address = %(addr)s " \
                 "ORDER BY masklen(address) {order} " \
                 "LIMIT %(limit)s".format(relation=relation,
-                        order="DESC" if relation == '>>' else "ASC")
+                                         order="DESC" if relation == '>>' else "ASC")
         with self.conn.cursor() as cur:
             cur.execute(query, {"addr": str(address), "limit": limit})
             yield from cur
@@ -138,7 +139,7 @@ class NicSession(lglass_sql.base.Session):
             cur.execute(
                 "SELECT object.class, object.key FROM domain "
                 "LEFT JOIN object ON object.id = object_id "
-                "WHERE reverse(lower(name)) LIKE %s "
+                "WHERE reverse(name) LIKE %s "
                 "ORDER BY name", (domain[::-1] + '%',))
             yield from cur
 
@@ -228,11 +229,11 @@ class NicSession(lglass_sql.base.Session):
                  "serial": obj.get("serial") or 0})
         elif obj.object_class == "domain":
             cur.execute(
-                    "INSERT INTO domain (object_id, name) "
-                    "VALUES (%(obj_id)s, %(name)s) "
-                    "ON CONFLICT (reverse(lower(name))) DO UPDATE SET "
-                    "object_id = %(obj_id)s",
-                    {"obj_id": obj_id, "name": obj.primary_key})
+                "INSERT INTO domain (object_id, name) "
+                "VALUES (%(obj_id)s, lower(%(name)s)) "
+                "ON CONFLICT name DO UPDATE SET "
+                "object_id = %(obj_id)s",
+                {"obj_id": obj_id, "name": obj.primary_key})
 
     def _save_inverse(self, obj, obj_id, cur):
         pg.extras.execute_values(
@@ -241,4 +242,3 @@ class NicSession(lglass_sql.base.Session):
             "ON CONFLICT DO NOTHING",
             [(obj_id, key, value.split()[0].lower()) for key, value in obj.data
                 if key in self.backend.inverse_keys])
-

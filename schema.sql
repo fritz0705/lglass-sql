@@ -96,5 +96,6 @@ CREATE TABLE IF NOT EXISTS domain (
 );
 
 CREATE INDEX IF NOT EXISTS domain_idx_object_id ON domain (object_id);
-CREATE INDEX IF NOT EXISTS domain_idx_name_rev ON domain (reverse(name));
+CREATE INDEX IF NOT EXISTS domain_idx_name_rev
+	ON domain (reverse(name) varchar_pattern_ops);
 
