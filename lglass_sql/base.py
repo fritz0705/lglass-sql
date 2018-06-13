@@ -102,6 +102,20 @@ class Session(lglass.database.ProxyDatabase):
                 "WHERE object_id = %s "
                 "ORDER BY position", (obj_id,))
             return lglass.object.Object(cur.fetchall())
+    
+    def fetch_by_id(self, object_id):
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT key, value FROM object_field "
+                    "WHERE object_id = %s "
+                    "ORDER BY position", (object_id,))
+            if not cur.rowcount:
+                raise KeyError(repr((class_, key)))
+            return lglass.object.Object(cur.fetchall())
+
+    def all_ids(self):
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT id FROM object")
+            yield from cur
 
     def lookup(self, classes=None, keys=None):
         if not classes:
@@ -113,13 +127,13 @@ class Session(lglass.database.ProxyDatabase):
                 cur.execute(
                     "SELECT class, key FROM object "
                     "WHERE lower(class) IN %s", (classes,))
-                return cur.fetchall()
+                yield from cur
         elif callable(keys):
             with self.conn.cursor() as cur:
                 cur.execute(
                     "SELECT class, key FROM object "
                     "WHERE lower(class) IN %s ", (classes,))
-                return list(filter(lambda x: keys(x[1]), cur.fetchall()))
+                yield from filter(lambda x: keys(x[1]), cur)
         else:
             keys = tuple(map(str.lower, keys))
             with self.conn.cursor() as cur:
@@ -127,7 +141,7 @@ class Session(lglass.database.ProxyDatabase):
                     "SELECT class, key FROM object "
                     "WHERE lower(class) IN %s "
                     "AND lower(key) IN %s", (classes, keys))
-                return cur.fetchall()
+                yield from cur
 
     def search(self, query={}, classes=None, keys=None):
         return lglass.database.Database.search(
