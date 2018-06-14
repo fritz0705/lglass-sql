@@ -52,6 +52,10 @@ class Database(lglass.database.Database):
             return Session(self, self.pool.getconn(), pool=self.pool)
         return Session(self, pg.connect(self.dsn, **self._connect_options))
 
+    def primary_spec(self, obj):
+        class_, key = super().primary_spec(obj)
+        return class_, key.lower()
+
 
 class Session(lglass.database.ProxyDatabase):
     def __init__(self, backend, conn, pool=None):
