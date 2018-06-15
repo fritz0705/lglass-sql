@@ -11,17 +11,9 @@ import lglass_sql.base
 
 
 class NicDatabase(lglass_sql.base.Database, lglass.nic.NicDatabaseMixin):
-    inverse_keys = {"abuse-mailbox", "admin-c", "author", "auth",
-                    "fingerpr", "person", "irt-nfy", "local-as", "mnt-irt",
-                    "mbrs-by-ref", "member-of", "mnt-by", "mnt-domains",
-                    "mnt-lower", "mnt-nfy", "mnt-routes", "mnt-ref", "notify",
-                    "nserver", "origin", "org", "ref-nfy", "tech-c", "upd-to",
-                    "zone-c"}
-
     def __init__(self, dsn_or_pool, *args, database_name=None, **kwargs):
         lglass_sql.base.Database.__init__(self, dsn_or_pool, *args, **kwargs)
         lglass.nic.NicDatabaseMixin.__init__(self)
-        self.inverse_keys = set(self.inverse_keys)
         self._manifest = None
         if database_name is None:
             database_name = self._get_database_name()
@@ -187,8 +179,6 @@ class NicSession(lglass_sql.base.Session):
              "last_modified": obj.last_modified})
         obj_id = cur.fetchone()[0]
         cur.execute(
-            "DELETE FROM inverse_field WHERE object_id = %s", (obj_id,))
-        cur.execute(
             "DELETE FROM object_field WHERE object_id = %s", (obj_id,))
         pg.extras.execute_values(
             cur, "INSERT INTO object_field "
@@ -236,9 +226,11 @@ class NicSession(lglass_sql.base.Session):
                 {"obj_id": obj_id, "name": obj.primary_key})
 
     def _save_inverse(self, obj, obj_id, cur):
+        cur.execute(
+            "DELETE FROM inverse_field WHERE object_id = %s", (obj_id,))
+        inverse_fields = [(obj_id, key, value.lower()) for key, value
+                in obj.inverse_fields()]
         pg.extras.execute_values(
             cur,
             "INSERT INTO inverse_field (object_id, key, value) VALUES %s "
-            "ON CONFLICT DO NOTHING",
-            [(obj_id, key, value.split()[0].lower()) for key, value in obj.data
-                if key in self.backend.inverse_keys])
+            "ON CONFLICT DO NOTHING", inverse_fields)
