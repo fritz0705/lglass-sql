@@ -118,6 +118,21 @@ class Session(lglass.database.ProxyDatabase):
                 raise KeyError(repr((class_, key)))
             return lglass.object.Object(cur.fetchall())
 
+    def delete_by_id(self, object_id):
+        with self.conn.cursor() as cur:
+            cur.execute("DELETE FROM object WHERE id = %s", (object_id,))
+            if not cur.rowcount:
+                raise KeyError(object_id)
+
+    def delete_by_spec(self, primary_class, primary_key):
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM object "
+                "WHERE lower(class) = lower(%s) AND lower(key) = lower(%s)",
+                (primary_class, primary_key))
+            if not cur.rowcount:
+                raise KeyError(object_id)
+
     def all_ids(self):
         with self.conn.cursor() as cur:
             cur.execute("SELECT id FROM object")
