@@ -165,6 +165,16 @@ class NicSession(lglass_sql.base.Session):
             obj.source = source
         return obj
 
+    def fetch_by_id(self, object_id):
+        return self.create_object(super().fetch_by_id(object_id))
+
+    def fetch_id(self, obj):
+        if hasattr(obj, "sql_id"):
+            return obj.sql_id
+        spec = self.primary_spec(obj)
+        return self.fetch(spec).sql_id
+        pass
+
     def save(self, obj, **options):
         obj = self.create_object(obj)
         with self.conn.cursor() as cur:
