@@ -101,18 +101,23 @@ class NicSession(lglass_sql.base.Session):
                                     "limit": limit})
             yield from cur
 
-    def lookup_inetnum(self, address, relation='>>', limit=None):
+    def lookup_inetnum(self, address, relation='>>=', limit=None,
+                       order='DESC'):
         address = str(address)
         objs = []
-        if relation not in {'>>', '<<'}:
-            raise ValueError("{} is not a valid relation, must be one "
-                             "of '>>' or '<<'".format(repr(relation)))
-        query = "SELECT object.class, object.key FROM inetnum " \
-                "LEFT JOIN object ON object.id = object_id " \
-                "WHERE address {relation} %(addr)s OR address = %(addr)s " \
-                "ORDER BY masklen(address) {order} " \
-                "LIMIT %(limit)s".format(relation=relation,
-                                         order="DESC" if relation == '>>' else "ASC")
+        if order not in {'ASC', 'DESC'}:
+            raise ValueError("{!r} is not a valid order, must be one "
+                             "of 'ASC' or 'DESC'".format(order))
+        if relation not in {'>>', '<<', '>>=', '<<='}:
+            raise ValueError("{!r} is not a valid relation, must be one "
+                             "of '>>', '>>=', '<<' or '<<='".format(relation))
+        query = "SELECT object.class, object.key FROM inetnum, object " \
+                "WHERE object.id = inetnum.object_id " \
+                "AND address {relation} %(addr)s " \
+                "ORDER BY masklen(address) {order}, address " \
+                "LIMIT %(limit)s".format(
+                    relation=relation,
+                    order=order)
         with self.conn.cursor() as cur:
             cur.execute(query, {"addr": str(address), "limit": limit})
             yield from cur
@@ -123,7 +128,7 @@ class NicSession(lglass_sql.base.Session):
                 "SELECT object.class, object.key FROM as_block "
                 "LEFT JOIN object ON object.id = object_id "
                 "WHERE range @> (%s::int8) "
-                "ORDER BY (upper(range) - lower(range))", (asn,))
+                "ORDER BY (upper(range) - lower(range)) DESC", (asn,))
             yield from cur
 
     def lookup_domain(self, domain):
@@ -138,17 +143,20 @@ class NicSession(lglass_sql.base.Session):
     def fetch(self, class_, key):
         with self.conn.cursor() as cur:
             cur.execute(
-                "SELECT id, source, last_modified, created FROM object "
-                "WHERE lower(class) = lower(%s) "
-                "AND lower(key) = lower(%s)", (class_, key))
+                "SELECT object.id, object.source, object.last_modified, "
+                "object.created, object_field.key, object_field.value "
+                "FROM object, object_field "
+                "WHERE object.id = object_field.object_id "
+                "AND lower(object.class) = lower(%s) "
+                "AND lower(object.key) = lower(%s) "
+                "ORDER BY object_field.position",
+                (class_, key))
             if not cur.rowcount:
                 raise KeyError(repr((class_, key)))
-            obj_id, source, last_modified, created = cur.fetchone()
-            cur.execute(
-                "SELECT key, value FROM object_field "
-                "WHERE object_id = %s "
-                "ORDER BY position", (obj_id,))
-            obj = self.create_object(cur.fetchall())
+            obj_id, source, last_modified, created, fkey, fval = cur.fetchone()
+            obj = self.create_object([(fkey, fval)])
+            obj.sql_id = obj_id
+            obj.extend((l[4], l[5]) for l in cur)
         if "last-modified" not in obj and last_modified:
             obj.last_modified = last_modified
         if "created" not in obj and created:
@@ -182,7 +190,8 @@ class NicSession(lglass_sql.base.Session):
             "DELETE FROM object_field WHERE object_id = %s", (obj_id,))
         pg.extras.execute_values(
             cur, "INSERT INTO object_field "
-            "(key, value, object_id, position) VALUES %s",
+            "(key, value, object_id, position) VALUES %s "
+            "RETURNING id",
             [(line[0], line[1], obj_id, offset)
              for offset, line in enumerate(obj.data)])
         return obj_id
@@ -229,7 +238,7 @@ class NicSession(lglass_sql.base.Session):
         cur.execute(
             "DELETE FROM inverse_field WHERE object_id = %s", (obj_id,))
         inverse_fields = [(obj_id, key, value.lower()) for key, value
-                in obj.inverse_fields()]
+                          in obj.inverse_fields()]
         pg.extras.execute_values(
             cur,
             "INSERT INTO inverse_field (object_id, key, value) VALUES %s "

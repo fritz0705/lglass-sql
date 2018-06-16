@@ -95,23 +95,25 @@ class Session(lglass.database.ProxyDatabase):
     def fetch(self, class_, key):
         with self.conn.cursor() as cur:
             cur.execute(
-                "SELECT id FROM object "
-                "WHERE lower(class) = lower(%s) "
-                "AND lower(key) = lower(%s)", (class_, key))
+                "SELECT object.id, object_field.key, object_field.value "
+                "FROM object_field, object "
+                "WHERE object.id = object_field.object_id "
+                "AND lower(object.class) = lower(%s) "
+                "AND lower(object.key) = lower(%s) "
+                "ORDER BY object_field.position", (class_, key))
             if not cur.rowcount:
                 raise KeyError(repr((class_, key)))
-            obj_id = cur.fetchone()[0]
-            cur.execute(
-                "SELECT key, value FROM object_field "
-                "WHERE object_id = %s "
-                "ORDER BY position", (obj_id,))
-            return lglass.object.Object(cur.fetchall())
-    
+            obj_id, fkey, fval = cur.fetchone()
+            obj = lglass.object.Object([(fkey, fval)])
+            obj.extend((l[1], l[2]) for l in cur)
+            obj.sql_id = obj_id
+            return obj
+
     def fetch_by_id(self, object_id):
         with self.conn.cursor() as cur:
             cur.execute("SELECT key, value FROM object_field "
-                    "WHERE object_id = %s "
-                    "ORDER BY position", (object_id,))
+                        "WHERE object_id = %s "
+                        "ORDER BY position", (object_id,))
             if not cur.rowcount:
                 raise KeyError(repr((class_, key)))
             return lglass.object.Object(cur.fetchall())
