@@ -75,7 +75,6 @@ class NicSession(lglass_sql.base.Session):
                        classes=None, keys=None):
         if classes is None:
             classes = self.object_classes
-        specs = []
         with self.conn.cursor() as cur:
             cur.execute(
                 "SELECT object.class, object.key FROM inverse_field "
@@ -228,14 +227,6 @@ class NicSession(lglass_sql.base.Session):
                 {"obj_id": obj_id, "range": pg.extras.NumericRange(
                     obj.start,
                     obj.end, '[]')})
-        elif obj.object_class == "database":
-            cur.execute(
-                "INSERT INTO source (name, serial, object_id) "
-                "VALUES (%(name)s, %(serial)s, %(obj_id)s) "
-                "ON CONFLICT (lower(name)) DO UPDATE SET "
-                "serial = %(serial)s",
-                {"obj_id": obj_id, "name": obj.primary_key,
-                 "serial": obj.get("serial") or 0})
         elif obj.object_class == "domain":
             cur.execute(
                 "INSERT INTO domain (object_id, name) "
