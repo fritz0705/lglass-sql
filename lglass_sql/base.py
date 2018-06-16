@@ -123,7 +123,7 @@ class Session(lglass.database.ProxyDatabase):
             cur.execute("SELECT id FROM object")
             yield from cur
 
-    def lookup(self, classes=None, keys=None):
+    def _lookup(self, classes=None, keys=None):
         if not classes:
             classes = self.object_classes
         classes = tuple(classes)
@@ -131,23 +131,31 @@ class Session(lglass.database.ProxyDatabase):
         if keys is None:
             with self.conn.cursor() as cur:
                 cur.execute(
-                    "SELECT class, key FROM object "
+                    "SELECT id, class, key FROM object "
                     "WHERE lower(class) IN %s", (classes,))
                 yield from cur
         elif callable(keys):
             with self.conn.cursor() as cur:
                 cur.execute(
-                    "SELECT class, key FROM object "
+                    "SELECT id, class, key FROM object "
                     "WHERE lower(class) IN %s ", (classes,))
                 yield from filter(lambda x: keys(x[1]), cur)
         else:
             keys = tuple(map(str.lower, keys))
             with self.conn.cursor() as cur:
                 cur.execute(
-                    "SELECT class, key FROM object "
+                    "SELECT id, class, key FROM object "
                     "WHERE lower(class) IN %s "
                     "AND lower(key) IN %s", (classes, keys))
                 yield from cur
+
+    def lookup(self, classes=None, keys=None):
+        for id_, class_, key in self._lookup(classes=classes, keys=keys):
+            yield class_, key
+
+    def lookup_ids(self, classes=None, keys=None):
+        for id_, _, _ in self._lookup(classes=classes, keys=keys):
+            yield id_
 
     def search(self, query={}, classes=None, keys=None):
         return lglass.database.Database.search(
@@ -173,4 +181,3 @@ class Session(lglass.database.ProxyDatabase):
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
-
