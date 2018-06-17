@@ -173,6 +173,11 @@ class NicSession(lglass_sql.base.Session):
         spec = self.primary_spec(obj)
         return self.fetch(spec).sql_id
         pass
+    
+    def reindex(self, obj):
+        obj_id = self.fetch_id(obj)
+        with self.conn.cursor() as cur:
+            self._save_inverse(obj, obj_id, cur)
 
     def save(self, obj, **options):
         obj = self.create_object(obj)
