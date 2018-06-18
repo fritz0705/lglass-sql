@@ -21,8 +21,9 @@ class Database(lglass.database.Database):
 
     def save(self, obj, **options):
         with self.session() as sess:
-            sess.save(obj, **options)
+            ret = sess.save(obj, **options)
             sess.commit()
+        return ret
 
     def delete(self, obj):
         with self.session() as sess:

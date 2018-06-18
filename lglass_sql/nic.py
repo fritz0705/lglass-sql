@@ -26,17 +26,17 @@ class NicDatabase(lglass_sql.base.Database, lglass.nic.NicDatabaseMixin):
             return NicSession(self, self.pool.getconn(), pool=self.pool)
         return NicSession(self, pg.connect(self.dsn, **self._connect_options))
 
-    def search_route(self, address):
+    def lookup_route(self, *args, **kwargs):
         with self.session() as sess:
-            return list(sess.search_route(address))
+            return list(sess.lookup_route(*args, **kwargs))
 
-    def search_inetnum(self, address):
+    def lookup_inetnum(self, *args, **kwargs):
         with self.session() as sess:
-            return list(sess.search_inetnum(address))
+            return list(self.lookup_inetnum(*args, **kwargs))
 
-    def search_as_block(self, asn):
+    def lookup_as_block(self, *args, **kwargs):
         with self.session() as sess:
-            return list(sess.search_as_block(asn))
+            return list(self.lookup_as_block(*args, **kwargs))
 
     def _get_database_name(self):
         try:
@@ -64,10 +64,6 @@ class NicDatabase(lglass_sql.base.Database, lglass.nic.NicDatabaseMixin):
 
 
 class NicSession(lglass_sql.base.Session):
-    @property
-    def inverse_keys(self):
-        return self.backend.inverse_keys
-
     def create_object(self, *args, **kwargs):
         return self.backend.create_object(*args, **kwargs)
 
