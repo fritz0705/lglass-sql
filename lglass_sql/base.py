@@ -33,6 +33,14 @@ class Database(lglass.database.Database):
         with self.session() as sess:
             return sess.fetch(class_, key)
 
+    def fetch_by_id(self, id_):
+        with self.session() as sess:
+            return sess.fetch_by_id(id_)
+
+    def fetch_id(self, class_, key):
+        with self.session() as sess:
+            return sess.fetch_id(class_, key)
+
     def lookup(self, classes=None, keys=None):
         with self.session() as sess:
             return list(sess.lookup(classes=classes, keys=keys))
@@ -118,6 +126,16 @@ class Session(lglass.database.ProxyDatabase):
                 raise KeyError(repr((class_, key)))
             return lglass.object.Object(cur.fetchall())
 
+    def fetch_id(self, class_, key):
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT id FROM object "
+                        "WHERE lower(class) = lower(%s) "
+                        "AND lower(key) = lower(%s)",
+                        (class_, key))
+            if not cur.rowcount:
+                return None
+            return cur.fetchone()[0]
+
     def delete_by_id(self, object_id):
         with self.conn.cursor() as cur:
             cur.execute("DELETE FROM object WHERE id = %s", (object_id,))
@@ -165,7 +183,7 @@ class Session(lglass.database.ProxyDatabase):
                 yield from cur
 
     def lookup(self, classes=None, keys=None):
-        for id_, class_, key in self._lookup(classes=classes, keys=keys):
+        for _, class_, key in self._lookup(classes=classes, keys=keys):
             yield class_, key
 
     def lookup_ids(self, classes=None, keys=None):

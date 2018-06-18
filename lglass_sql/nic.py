@@ -167,13 +167,6 @@ class NicSession(lglass_sql.base.Session):
     def fetch_by_id(self, object_id):
         return self.create_object(super().fetch_by_id(object_id))
 
-    def fetch_id(self, obj):
-        if hasattr(obj, "sql_id"):
-            return obj.sql_id
-        spec = self.primary_spec(obj)
-        return self.fetch(spec).sql_id
-        pass
-    
     def reindex(self, obj):
         obj_id = self.fetch_id(obj)
         with self.conn.cursor() as cur:
