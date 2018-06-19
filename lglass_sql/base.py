@@ -155,7 +155,7 @@ class Session(lglass.database.ProxyDatabase):
     def all_ids(self):
         with self.conn.cursor() as cur:
             cur.execute("SELECT id FROM object")
-            yield from cur
+            yield from map(lambda t: t[0], cur)
 
     def _lookup(self, classes=None, keys=None):
         if not classes:
