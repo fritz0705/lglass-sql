@@ -107,12 +107,16 @@ class NicSession(lglass_sql.base.Session):
             raise ValueError("{!r} is not a valid relation, must be one "
                              "of '>>', '>>=', '<<' or '<<='".format(relation))
         query = "SELECT object.class, object.key FROM inetnum, object " \
-                "WHERE object.id = inetnum.object_id " \
-                "AND address {relation} %(addr)s " \
-                "ORDER BY masklen(address) {order}, address " \
-                "LIMIT %(limit)s".format(
-                    relation=relation,
-                    order=order)
+                "WHERE object.id = inetnum.object_id "
+        if relation in {'>>=', '<<='}:
+            relation = relation[:-1]
+            query += "AND (address {relation} %(addr) s " \
+                     "OR address = %(addr)s) ".format(relation=relation)
+        else:
+            query += "AND address {relation} %(addr)s ".format(
+                    relation=relation)
+        query += "ORDER BY masklen(address) {order}, address " \
+                 "LIMIT %(limit)s".format(order=order)
         with self.conn.cursor() as cur:
             cur.execute(query, {"addr": str(address), "limit": limit})
             yield from cur
