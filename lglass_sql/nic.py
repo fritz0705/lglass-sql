@@ -110,7 +110,7 @@ class NicSession(lglass_sql.base.Session):
                 "WHERE object.id = inetnum.object_id "
         if relation in {'>>=', '<<='}:
             relation = relation[:-1]
-            query += "AND (address {relation} %(addr) s " \
+            query += "AND (address {relation} %(addr)s " \
                      "OR address = %(addr)s) ".format(relation=relation)
         else:
             query += "AND address {relation} %(addr)s ".format(
