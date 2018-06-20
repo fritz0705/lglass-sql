@@ -22,9 +22,7 @@ class NicDatabase(lglass_sql.base.Database, lglass.nic.NicDatabaseMixin):
     def session(self, conn=None):
         if conn is not None:
             return NicSession(self, conn)
-        if self.pool is not None:
-            return NicSession(self, self.pool.getconn(), pool=self.pool)
-        return NicSession(self, pg.connect(self.dsn, **self._connect_options))
+        return NicSession(self, self._connect(), pool=self.pool)
 
     def lookup_route(self, *args, **kwargs):
         with self.session() as sess:

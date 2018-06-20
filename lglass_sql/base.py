@@ -12,12 +12,17 @@ class Database(lglass.database.Database):
     pool = None
     dsn = None
 
-    def __init__(self, dsn_or_pool, connect_options={}):
+    def __init__(self, dsn_or_pool, connect_options={}, implicit_pool=False,
+            schema=None):
         if isinstance(dsn_or_pool, pg.pool.AbstractConnectionPool):
             self.pool = dsn_or_pool
+        elif implicit_pool:
+            self.pool = pg.pool.SimpleConnectionPool(1, 2, dsn_or_pool,
+                    **connect_options)
         else:
             self.dsn = dsn_or_pool
         self._connect_options = connect_options
+        self._schema = schema
 
     def save(self, obj, **options):
         with self.session() as sess:
@@ -54,12 +59,20 @@ class Database(lglass.database.Database):
         with self.session() as sess:
             return list(sess.find(filter=filter, classes=classes, keys=keys))
 
+    def _connect(self):
+        if self.pool is not None:
+            conn = self.pool.getconn()
+        else:
+            conn = pg.connect(self.dsn, **self._connect_options)
+        if self._schema is not None:
+            with conn.cursor() as cur:
+                cur.execute("SET search_path TO %s", (self._schema,))
+        return conn
+
     def session(self, conn=None):
         if conn is not None:
             return Session(self, conn)
-        if self.pool is not None:
-            return Session(self, self.pool.getconn(), pool=self.pool)
-        return Session(self, pg.connect(self.dsn, **self._connect_options))
+        return Session(self, self._connect(), pool=self.pool)
 
     def primary_spec(self, obj):
         class_, key = super().primary_spec(obj)
