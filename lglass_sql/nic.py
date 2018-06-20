@@ -32,11 +32,11 @@ class NicDatabase(lglass_sql.base.Database, lglass.nic.NicDatabaseMixin):
 
     def lookup_inetnum(self, *args, **kwargs):
         with self.session() as sess:
-            return list(self.lookup_inetnum(*args, **kwargs))
+            return list(sess.lookup_inetnum(*args, **kwargs))
 
     def lookup_as_block(self, *args, **kwargs):
         with self.session() as sess:
-            return list(self.lookup_as_block(*args, **kwargs))
+            return list(sess.lookup_as_block(*args, **kwargs))
 
     def _get_database_name(self):
         try:
