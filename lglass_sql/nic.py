@@ -164,6 +164,37 @@ class NicSession(lglass_sql.base.Session):
 
     def fetch_by_id(self, object_id):
         return self.create_object(super().fetch_by_id(object_id))
+    
+    def find(self, filter=None, classes=None, keys=None):
+        if not classes:
+            classes = self.object_classes
+        classes = tuple(classes)
+        query_keys = tuple()
+        query =  ("SELECT object.id, object.class, object.key, "
+                 "object.last_modified, object.created, object.source, "
+                 "ARRAY(SELECT ARRAY[f.key, f.value] FROM object_field "
+                 "AS f WHERE f.object_id = object.id ORDER BY f.position) "
+            "FROM object WHERE lower(class) IN %(classes)s ")
+        if keys and not callable(keys):
+            query += "AND lower(key) IN %(keys)s"
+            query_keys = tuple(keys)
+        with self.conn.cursor() as cur:
+            cur.execute(query, {"classes": classes, "keys": query_keys})
+            for id_, class_, key, last_modified, created, source, obj in cur:
+                if callable(keys) and not keys(key):
+                    continue
+                obj = self.create_object(obj)
+                obj.sql_id = id_
+                if "last-modified" not in obj and last_modified:
+                    obj.last_modified = last_modified
+                if "created" not in obj and created:
+                    obj.created = created
+                if "source" not in obj and source:
+                    obj.source = source
+                if callable(filter) and not filter(obj):
+                    continue
+                yield obj
+
 
     def reindex(self, obj):
         obj_id = self.fetch_id(obj)
