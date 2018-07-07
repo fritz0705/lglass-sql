@@ -1,5 +1,7 @@
 # coding: utf-8
 
+import itertools
+
 import psycopg2 as pg
 import psycopg2.extras
 import psycopg2.extensions
@@ -67,6 +69,8 @@ class NicSession(lglass_sql.base.Session):
 
     def search_inverse(self, inverse_keys, inverse_values,
                        classes=None, keys=None):
+        def _map_value(val):
+            return val.lower().replace(" ", "")
         if classes is None:
             classes = self.object_classes
         with self.conn.cursor() as cur:
@@ -77,7 +81,7 @@ class NicSession(lglass_sql.base.Session):
                 "AND inverse_field.value IN %(values)s "
                 "ORDER BY inverse_field.value",
                 {"keys": tuple(inverse_keys),
-                 "values": tuple(map(str.lower, inverse_values))})
+                 "values": tuple(map(_map_value, inverse_values))})
             for class_, key in cur:
                 if class_ in classes:
                     yield self.fetch(class_, key)
@@ -265,7 +269,8 @@ class NicSession(lglass_sql.base.Session):
     def _save_inverse(self, obj, obj_id, cur):
         cur.execute(
             "DELETE FROM inverse_field WHERE object_id = %s", (obj_id,))
-        inverse_fields = [(obj_id, key, value.lower()) for key, value
+        inverse_fields = [(obj_id, key, value.lower().replace(" ", ""))
+                for key, value
                           in obj.inverse_fields()]
         pg.extras.execute_values(
             cur,
