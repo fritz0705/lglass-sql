@@ -182,7 +182,7 @@ class NicSession(lglass_sql.base.Session):
         if keys and not callable(keys):
             query += "AND lower(key) IN %(keys)s"
             query_keys = tuple(keys)
-        with self.conn.cursor() as cur:
+        with self.conn.cursor(name='find_cur') as cur:
             cur.execute(query, {"classes": classes, "keys": query_keys})
             for id_, class_, key, last_modified, created, source, obj in cur:
                 if callable(keys) and not keys(key):
