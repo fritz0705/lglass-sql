@@ -201,7 +201,7 @@ class NicSession(lglass_sql.base.Session):
 
 
     def reindex(self, obj):
-        obj_id = self.fetch_id(obj)
+        obj_id = obj.sql_id
         with self.conn.cursor() as cur:
             self._save_inverse(obj, obj_id, cur)
 
